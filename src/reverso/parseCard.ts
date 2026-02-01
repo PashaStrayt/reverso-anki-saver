@@ -34,8 +34,8 @@ export function parseCard(cardElement: Element): ParseResult {
       .map(el => el.textContent?.trim())
       .filter((text): text is string => !!text);
     
-    // Join translations with line breaks for Anki
-    const translation = translations.join('\n');
+    // Join translations with HTML line breaks for Anki
+    const translation = translations.join('<br>');
 
     if (!translation) {
       console.warn('[Reverso->Anki] No Russian translation found for this card', cardElement);

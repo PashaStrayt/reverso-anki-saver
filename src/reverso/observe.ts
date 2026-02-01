@@ -1,10 +1,15 @@
-import { config } from '../config';
-import { parseCard } from './parseCard';
-import { addNoteToAnki, checkDuplicate } from '../anki/ankiConnect';
-import { toast } from '../ui/toast';
+import {
+  addNoteToAnki,
+  ankiRequest,
+  checkDuplicate,
+} from "../anki/ankiConnect";
+import { config } from "../config";
+import { toast } from "../ui/toast";
+import { parseCard } from "./parseCard";
 
-const BUTTON_CLASS = 'reverso-anki-button';
-const BUTTON_INJECTED_ATTR = 'data-anki-button-injected';
+const BUTTON_CLASS = "reverso-anki-button";
+const BADGE_CLASS = "reverso-anki-badge";
+const BUTTON_INJECTED_ATTR = "data-anki-button-injected";
 
 /**
  * Check if current viewport width is within supported range
@@ -22,10 +27,10 @@ function isViewportSupported(): boolean {
  * Styled to match Reverso's translation chips
  */
 function createButton(): HTMLButtonElement {
-  const button = document.createElement('button');
+  const button = document.createElement("button");
   button.className = BUTTON_CLASS;
-  button.textContent = '+ Add to Anki';
-  
+  button.textContent = "+ Add to Anki";
+
   GM_addStyle(`
     .${BUTTON_CLASS} {
       display: inline-block;
@@ -74,17 +79,20 @@ function createButton(): HTMLButtonElement {
       color: white;
     }
   `);
-  
+
   return button;
 }
 
 /**
  * Handle button click: parse card and add to Anki
  */
-async function handleAddToAnki(button: HTMLButtonElement, cardElement: Element) {
+async function handleAddToAnki(
+  button: HTMLButtonElement,
+  cardElement: Element
+) {
   // Check viewport width
   if (!isViewportSupported()) {
-    toast.error('⚠️ Wrong layout. Resize window to 767px or less.');
+    toast.error("⚠️ Wrong layout. Resize window to 767px or less.");
     console.warn(
       `[Reverso->Anki] Viewport width ${window.innerWidth}px exceeds maximum ${config.ui.maxWidthPx}px`
     );
@@ -94,24 +102,28 @@ async function handleAddToAnki(button: HTMLButtonElement, cardElement: Element) 
   // Disable button during processing
   button.disabled = true;
   const originalText = button.textContent;
-  button.textContent = 'Saving...';
-  
-  toast.info('Saving to Anki...');
+  button.textContent = "Saving...";
+
+  toast.info("Saving to Anki...");
 
   try {
     // Parse card
     const parseResult = parseCard(cardElement);
-    
+
     if (!parseResult.ok) {
       const reasons = {
-        missing_word: 'Could not find word in card',
-        missing_definition: 'Could not find definition in card',
-        layout_changed: 'Card layout has changed',
-        unknown: 'Unknown parsing error',
+        missing_word: "Could not find word in card",
+        missing_definition: "Could not find definition in card",
+        layout_changed: "Card layout has changed",
+        unknown: "Unknown parsing error",
       };
-      
+
       toast.error(`Parse failed: ${reasons[parseResult.reason]}`);
-      console.error('[Reverso->Anki] Parse failed:', parseResult.reason, cardElement);
+      console.error(
+        "[Reverso->Anki] Parse failed:",
+        parseResult.reason,
+        cardElement
+      );
       return;
     }
 
@@ -119,23 +131,30 @@ async function handleAddToAnki(button: HTMLButtonElement, cardElement: Element) 
 
     // Check for duplicates (but add anyway - might be a different meaning)
     const isDuplicate = await checkDuplicate(card.word);
-    
+
     // Add to Anki
     await addNoteToAnki(card);
-    
+
     if (isDuplicate) {
-      toast.success(`"${card.word}" added to Anki (duplicate word, different meaning)`);
-      button.textContent = '✓ Added (duplicate)';
+      toast.success(
+        `"${card.word}" added to Anki (duplicate word, different meaning)`
+      );
+      button.textContent = "✓ Added (duplicate)";
     } else {
       toast.success(`"${card.word}" added to Anki!`);
-      button.textContent = '✓ Added';
+      button.textContent = "✓ Added";
     }
-    button.classList.add('success');
-    
+    button.classList.add("success");
+
+    // Update badge to "In Anki" for the main word if this matches current page word
+    const currentWord = getCurrentWord();
+    if (currentWord && card.word.toLowerCase() === currentWord.toLowerCase()) {
+      addWordStatusBadge(true);
+    }
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error';
+    const message = err instanceof Error ? err.message : "Unknown error";
     toast.error(`Failed: ${message}`);
-    console.error('[Reverso->Anki] Add failed:', err);
+    console.error("[Reverso->Anki] Add failed:", err);
     button.disabled = false;
     button.textContent = originalText;
   }
@@ -151,23 +170,28 @@ function injectButton(cardElement: Element) {
   }
 
   const button = createButton();
-  
-  button.addEventListener('click', () => {
+
+  button.addEventListener("click", () => {
     handleAddToAnki(button, cardElement);
   });
 
   // Insert button after the actions block (on a new line)
-  const actionsBlock = cardElement.querySelector('.definition-example__actions');
+  const actionsBlock = cardElement.querySelector(
+    ".definition-example__actions"
+  );
   if (actionsBlock) {
     // Insert after the actions block
-    actionsBlock.insertAdjacentElement('afterend', button);
+    actionsBlock.insertAdjacentElement("afterend", button);
   } else {
     // Fallback: append to the card itself
     cardElement.appendChild(button);
-    console.warn('[Reverso->Anki] Could not find actions block, button appended to card', cardElement);
+    console.warn(
+      "[Reverso->Anki] Could not find actions block, button appended to card",
+      cardElement
+    );
   }
 
-  cardElement.setAttribute(BUTTON_INJECTED_ATTR, 'true');
+  cardElement.setAttribute(BUTTON_INJECTED_ATTR, "true");
 }
 
 /**
@@ -176,9 +200,9 @@ function injectButton(cardElement: Element) {
 function processCards() {
   // Select all definition cards on the page
   // Each app-definition-example is one card
-  const cards = document.querySelectorAll('app-definition-example');
-  
-  cards.forEach(card => {
+  const cards = document.querySelectorAll("app-definition-example");
+
+  cards.forEach((card) => {
     injectButton(card);
   });
 
@@ -186,15 +210,239 @@ function processCards() {
 }
 
 /**
+ * Get the current word/phrase from the page
+ */
+function getCurrentWord(): string | null {
+  // Try to get from URL first
+  const match = window.location.pathname.match(/\/english-definition\/([^/]+)/);
+  if (match) {
+    return decodeURIComponent(match[1]).replace(/[+_]/g, " ");
+  }
+
+  // Fallback: try to get from blue word element
+  const blueWord = document.querySelector(".definition-list__blue-word");
+  if (blueWord) {
+    return blueWord.textContent?.trim() || null;
+  }
+
+  return null;
+}
+
+/**
+ * Check if word already exists in Anki
+ */
+async function checkWordInAnki(word: string): Promise<boolean> {
+  try {
+    // Search for notes with this word in the Word field
+    const query = `"deck:${config.anki.deckName}" "note:${config.anki.modelName}" "Word:${word}"`;
+    const result = await ankiRequest<number[]>("findNotes", { query });
+    return result.length > 0;
+  } catch (error) {
+    console.error("[Reverso->Anki] Error checking word in Anki:", error);
+    return false;
+  }
+}
+
+/**
+ * Add badge next to the word
+ */
+function addWordStatusBadge(inAnki: boolean) {
+  const blueWord = document.querySelector(".definition-list__blue-word");
+  if (!blueWord) {
+    return;
+  }
+
+  // Check if badge exists as the NEXT sibling of current blue word
+  const existingBadge = blueWord.nextElementSibling;
+  const isBadge = existingBadge?.classList.contains(BADGE_CLASS);
+
+  // If badge already exists next to THIS blue word with correct status, don't recreate
+  if (isBadge) {
+    const hasCorrectStatus = inAnki
+      ? existingBadge?.classList.contains("in-anki")
+      : existingBadge?.classList.contains("not-in-anki");
+
+    if (hasCorrectStatus) {
+      console.log(
+        `[Reverso->Anki] Badge already exists with correct status: ${
+          inAnki ? "In Anki" : "Not in Anki"
+        }`
+      );
+      return;
+    }
+
+    // Status changed, remove old badge
+    existingBadge?.remove();
+  }
+
+  // Remove any orphaned badges (from old words)
+  const allBadges = document.querySelectorAll(`.${BADGE_CLASS}`);
+  allBadges.forEach((badge) => badge.remove());
+
+  const badge = document.createElement("span");
+  badge.className = BADGE_CLASS;
+
+  if (inAnki) {
+    badge.textContent = "✓ In Anki";
+    badge.classList.add("in-anki");
+  } else {
+    badge.textContent = "✗ Not in Anki";
+    badge.classList.add("not-in-anki");
+  }
+
+  GM_addStyle(`
+    .${BADGE_CLASS} {
+      display: inline-flex;
+      align-items: center;
+      height: 32px;
+      margin-left: 12px;
+      padding: 0 10px;
+      border-radius: 12px;
+      color: white;
+      font-size: 12px;
+      font-weight: 500;
+      font-family: Roboto, sans-serif;
+      vertical-align: middle;
+      white-space: nowrap;
+    }
+    
+    .${BADGE_CLASS}.in-anki {
+      background-color: #4caf50;
+    }
+    
+    .${BADGE_CLASS}.not-in-anki {
+      background-color: #f44336;
+    }
+  `);
+
+  blueWord.insertAdjacentElement("afterend", badge);
+  console.log(
+    `[Reverso->Anki] Added badge: ${inAnki ? "In Anki" : "Not in Anki"}`
+  );
+}
+
+/**
+ * Check current word and show badge
+ */
+async function checkAndMarkExistingWord() {
+  // Reset recreation counter for new word
+  badgeRecreationAttempts = 0;
+
+  const word = getCurrentWord();
+  if (!word) {
+    console.log("[Reverso->Anki] Could not extract current word");
+    return;
+  }
+
+  console.log("[Reverso->Anki] Checking if word exists in Anki:", word);
+
+  const exists = await checkWordInAnki(word);
+  addWordStatusBadge(exists);
+}
+
+/**
+ * Track the current word to detect navigation
+ */
+let currentTrackedWord: string | null = null;
+
+/**
+ * Track badge recreation attempts to prevent infinite loops
+ */
+let badgeRecreationAttempts = 0;
+const MAX_BADGE_RECREATION_ATTEMPTS = 3;
+
+/**
  * Start observing the page for cards
  */
 export function startObserver() {
+  // Check if current word already exists in Anki
+  checkAndMarkExistingWord();
+  currentTrackedWord = getCurrentWord();
+
   // Initial injection
   processCards();
 
   // Watch for dynamic changes (SPA navigation, lazy loading, etc.)
-  const observer = new MutationObserver(() => {
-    processCards();
+  const observer = new MutationObserver((mutations) => {
+    // Check if badge was removed by DOM update and recreate it
+    const badgeExists = !!document.querySelector(`.${BADGE_CLASS}`);
+    const removedBadge = mutations.some((m) => {
+      return Array.from(m.removedNodes).some((node) => {
+        if (node instanceof HTMLElement) {
+          return (
+            node.classList?.contains(BADGE_CLASS) ||
+            node.querySelector?.(`.${BADGE_CLASS}`)
+          );
+        }
+        return false;
+      });
+    });
+
+    if (removedBadge && !badgeExists) {
+      // Recreate badge after a delay (to let Angular/React finish its update)
+      if (badgeRecreationAttempts < MAX_BADGE_RECREATION_ATTEMPTS) {
+        badgeRecreationAttempts++;
+        setTimeout(async () => {
+          const word = getCurrentWord();
+          if (word === currentTrackedWord) {
+            const exists = await checkWordInAnki(word || "");
+            addWordStatusBadge(exists);
+          }
+        }, 300); // Wait for Angular/React to finish updating
+      }
+    }
+
+    // Check if the blue word has changed (SPA navigation to a new word)
+    const newWord = getCurrentWord();
+
+    if (newWord && newWord !== currentTrackedWord) {
+      console.log(
+        "[Reverso->Anki] Word changed from",
+        currentTrackedWord,
+        "to",
+        newWord
+      );
+      currentTrackedWord = newWord;
+      // Re-check badge status for the new word
+      checkAndMarkExistingWord();
+    }
+
+    // Filter out mutations caused by our own elements (buttons, badges, toasts)
+    const relevantMutation = mutations.some((mutation) => {
+      // Ignore mutations in our button/badge/toast containers
+      const target = mutation.target as HTMLElement;
+
+      // Check if mutation is inside our elements
+      if (
+        target.classList?.contains(BUTTON_CLASS) ||
+        target.classList?.contains(BADGE_CLASS) ||
+        target.closest(".reverso-anki-toast-container")
+      ) {
+        return false;
+      }
+
+      // Check if added nodes are our elements
+      if (mutation.addedNodes.length > 0) {
+        for (const node of Array.from(mutation.addedNodes)) {
+          if (node instanceof HTMLElement) {
+            if (
+              node.classList?.contains(BUTTON_CLASS) ||
+              node.classList?.contains(BADGE_CLASS) ||
+              node.classList?.contains("reverso-anki-toast-container")
+            ) {
+              return false;
+            }
+          }
+        }
+      }
+
+      return true;
+    });
+
+    // Only process if there are relevant mutations
+    if (relevantMutation) {
+      processCards();
+    }
   });
 
   observer.observe(document.body, {
@@ -202,5 +450,5 @@ export function startObserver() {
     subtree: true,
   });
 
-  console.log('[Reverso->Anki] Observer started');
+  console.log("[Reverso->Anki] Observer started");
 }

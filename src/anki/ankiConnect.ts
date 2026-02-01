@@ -5,7 +5,7 @@ import type { AnkiConnectResponse, ParsedCard } from '../types';
  * AnkiConnect client using GM_xmlhttpRequest to bypass CORS
  */
 
-function ankiRequest<T>(action: string, params: Record<string, unknown> = {}): Promise<T> {
+export function ankiRequest<T>(action: string, params: Record<string, unknown> = {}): Promise<T> {
   return new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: 'POST',

@@ -29,7 +29,7 @@ function createButton(): HTMLButtonElement {
   GM_addStyle(`
     .${BUTTON_CLASS} {
       display: inline-block;
-      margin-top: 12px;
+      margin: 12px 0 0 20px;
       padding: 6px 14px;
       border-radius: 6px;
       white-space: nowrap;

@@ -12,7 +12,9 @@ export function parseCard(cardElement: Element): ParseResult {
       console.error('[Reverso->Anki] Failed to parse: word not found in page header');
       return { ok: false, reason: 'missing_word' };
     }
-    const word = wordEl.textContent.trim();
+    const wordElClone = wordEl.cloneNode(true) as Element;
+    wordElClone.querySelectorAll('app-badge, .badge').forEach(el => el.remove());
+    const word = (wordElClone.textContent ?? wordEl.textContent).trim();
 
     // Find the definition text (the main meaning)
     const definitionEl = cardElement.querySelector('.definition-example__mention-sentence');

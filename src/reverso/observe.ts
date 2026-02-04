@@ -1,7 +1,8 @@
 import {
   addNoteToAnki,
-  ankiRequest,
   checkDuplicate,
+  findCardIdsByWord,
+  markWordAgain,
 } from "../anki/ankiConnect";
 import { config } from "../config";
 import { toast } from "../ui/toast";
@@ -9,6 +10,7 @@ import { parseCard } from "./parseCard";
 
 const BUTTON_CLASS = "reverso-anki-button";
 const BADGE_CLASS = "reverso-anki-badge";
+const AGAIN_BUTTON_CLASS = "reverso-anki-again-button";
 const BUTTON_INJECTED_ATTR = "data-anki-button-injected";
 
 /**
@@ -161,6 +163,46 @@ async function handleAddToAnki(
 }
 
 /**
+ * Handle "Mark as again" click for the current word
+ */
+async function handleMarkAsAgain(button: HTMLButtonElement) {
+  const currentWord = getCurrentWord();
+  if (!currentWord) {
+    toast.error("Could not determine the current word");
+    return;
+  }
+
+  button.disabled = true;
+  const originalText = button.textContent;
+  button.textContent = "Marking...";
+
+  toast.info(`Marking "${currentWord}" as again...`);
+
+  try {
+    const answeredCount = await markWordAgain(currentWord);
+
+    if (answeredCount === 0) {
+      toast.error(`"${currentWord}" not found in Anki`);
+      button.disabled = false;
+      button.textContent = originalText;
+      return;
+    }
+
+    const suffix = answeredCount > 1 ? ` (${answeredCount} cards)` : "";
+    toast.success(`"${currentWord}" marked as again${suffix}`);
+    button.textContent = "✓ Marked as again";
+    button.classList.add("success");
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    toast.error(`Failed: ${message}`);
+    console.error("[Reverso->Anki] Mark as again failed:", err);
+    button.disabled = false;
+    button.textContent = originalText;
+    button.classList.add("error");
+  }
+}
+
+/**
  * Inject button into a card element (idempotent)
  */
 function injectButton(cardElement: Element) {
@@ -233,10 +275,9 @@ function getCurrentWord(): string | null {
  */
 async function checkWordInAnki(word: string): Promise<boolean> {
   try {
-    // Search for notes with this word in the Word field
-    const query = `"deck:${config.anki.deckName}" "note:${config.anki.modelName}" "Word:${word}"`;
-    const result = await ankiRequest<number[]>("findNotes", { query });
-    return result.length > 0;
+    // Search for cards with this word in the Word field
+    const cardIds = await findCardIdsByWord(word);
+    return cardIds.length > 0;
   } catch (error) {
     console.error("[Reverso->Anki] Error checking word in Anki:", error);
     return false;
@@ -255,29 +296,47 @@ function addWordStatusBadge(inAnki: boolean) {
   // Check if badge exists as the NEXT sibling of current blue word
   const existingBadge = blueWord.nextElementSibling;
   const isBadge = existingBadge?.classList.contains(BADGE_CLASS);
+  const existingAgainButton = isBadge
+    ? existingBadge?.nextElementSibling
+    : null;
+  const isAgainButton =
+    existingAgainButton?.classList.contains(AGAIN_BUTTON_CLASS);
 
-  // If badge already exists next to THIS blue word with correct status, don't recreate
-  if (isBadge) {
-    const hasCorrectStatus = inAnki
-      ? existingBadge?.classList.contains("in-anki")
-      : existingBadge?.classList.contains("not-in-anki");
-
-    if (hasCorrectStatus) {
-      console.log(
-        `[Reverso->Anki] Badge already exists with correct status: ${
-          inAnki ? "In Anki" : "Not in Anki"
-        }`
-      );
-      return;
+  // Remove any orphaned badges/buttons (from old words)
+  const allBadges = document.querySelectorAll(`.${BADGE_CLASS}`);
+  allBadges.forEach((badge) => {
+    if (badge !== existingBadge) {
+      badge.remove();
     }
+  });
 
-    // Status changed, remove old badge
-    existingBadge?.remove();
+  const allAgainButtons = document.querySelectorAll(`.${AGAIN_BUTTON_CLASS}`);
+  allAgainButtons.forEach((button) => {
+    if (button !== existingAgainButton) {
+      button.remove();
+    }
+  });
+
+  const hasCorrectStatus = isBadge
+    ? inAnki
+      ? existingBadge?.classList.contains("in-anki")
+      : existingBadge?.classList.contains("not-in-anki")
+    : false;
+
+  if (hasCorrectStatus && isAgainButton) {
+    console.log(
+      `[Reverso->Anki] Badge and button already exist: ${
+        inAnki ? "In Anki" : "Not in Anki"
+      }`
+    );
+    return;
   }
 
-  // Remove any orphaned badges (from old words)
-  const allBadges = document.querySelectorAll(`.${BADGE_CLASS}`);
-  allBadges.forEach((badge) => badge.remove());
+  // Status changed or controls missing, remove old elements
+  existingBadge?.remove();
+  if (isAgainButton) {
+    existingAgainButton?.remove();
+  }
 
   const badge = document.createElement("span");
   badge.className = BADGE_CLASS;
@@ -289,6 +348,14 @@ function addWordStatusBadge(inAnki: boolean) {
     badge.textContent = "✗ Not in Anki";
     badge.classList.add("not-in-anki");
   }
+
+  const againButton = document.createElement("button");
+  againButton.className = AGAIN_BUTTON_CLASS;
+  againButton.textContent = "Mark as again";
+  againButton.disabled = !inAnki;
+  againButton.addEventListener("click", () => {
+    handleMarkAsAgain(againButton);
+  });
 
   GM_addStyle(`
     .${BADGE_CLASS} {
@@ -313,11 +380,57 @@ function addWordStatusBadge(inAnki: boolean) {
     .${BADGE_CLASS}.not-in-anki {
       background-color: #f44336;
     }
+
+    .${AGAIN_BUTTON_CLASS} {
+      display: inline-flex;
+      align-items: center;
+      height: 32px;
+      margin-left: 8px;
+      padding: 0 12px;
+      border-radius: 12px;
+      background-color: #f5c26b;
+      color: #3c2a00;
+      font-size: 12px;
+      font-weight: 600;
+      font-family: Roboto, sans-serif;
+      border: none;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.2s ease;
+    }
+
+    .${AGAIN_BUTTON_CLASS}:hover {
+      background-color: #f0b548;
+    }
+
+    .${AGAIN_BUTTON_CLASS}:active {
+      transform: translateY(0);
+    }
+
+    .${AGAIN_BUTTON_CLASS}:disabled {
+      background-color: #d8d8d8;
+      color: #777;
+      cursor: not-allowed;
+      opacity: 0.8;
+    }
+
+    .${AGAIN_BUTTON_CLASS}.success {
+      background-color: #31a960;
+      color: white;
+    }
+
+    .${AGAIN_BUTTON_CLASS}.error {
+      background-color: #e45c45;
+      color: white;
+    }
   `);
 
   blueWord.insertAdjacentElement("afterend", badge);
+  badge.insertAdjacentElement("afterend", againButton);
   console.log(
-    `[Reverso->Anki] Added badge: ${inAnki ? "In Anki" : "Not in Anki"}`
+    `[Reverso->Anki] Added badge and button: ${
+      inAnki ? "In Anki" : "Not in Anki"
+    }`
   );
 }
 
@@ -366,19 +479,24 @@ export function startObserver() {
   const observer = new MutationObserver((mutations) => {
     // Check if badge was removed by DOM update and recreate it
     const badgeExists = !!document.querySelector(`.${BADGE_CLASS}`);
-    const removedBadge = mutations.some((m) => {
+    const againButtonExists = !!document.querySelector(
+      `.${AGAIN_BUTTON_CLASS}`
+    );
+    const removedStatusControls = mutations.some((m) => {
       return Array.from(m.removedNodes).some((node) => {
         if (node instanceof HTMLElement) {
           return (
             node.classList?.contains(BADGE_CLASS) ||
-            node.querySelector?.(`.${BADGE_CLASS}`)
+            node.classList?.contains(AGAIN_BUTTON_CLASS) ||
+            node.querySelector?.(`.${BADGE_CLASS}`) ||
+            node.querySelector?.(`.${AGAIN_BUTTON_CLASS}`)
           );
         }
         return false;
       });
     });
 
-    if (removedBadge && !badgeExists) {
+    if (removedStatusControls && (!badgeExists || !againButtonExists)) {
       // Recreate badge after a delay (to let Angular/React finish its update)
       if (badgeRecreationAttempts < MAX_BADGE_RECREATION_ATTEMPTS) {
         badgeRecreationAttempts++;
@@ -416,6 +534,7 @@ export function startObserver() {
       if (
         target.classList?.contains(BUTTON_CLASS) ||
         target.classList?.contains(BADGE_CLASS) ||
+        target.classList?.contains(AGAIN_BUTTON_CLASS) ||
         target.closest(".reverso-anki-toast-container")
       ) {
         return false;
@@ -428,6 +547,7 @@ export function startObserver() {
             if (
               node.classList?.contains(BUTTON_CLASS) ||
               node.classList?.contains(BADGE_CLASS) ||
+              node.classList?.contains(AGAIN_BUTTON_CLASS) ||
               node.classList?.contains("reverso-anki-toast-container")
             ) {
               return false;

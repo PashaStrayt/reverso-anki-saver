@@ -143,3 +143,32 @@ export async function checkDuplicate(word: string): Promise<boolean> {
     return false;
   }
 }
+
+function escapeQueryValue(value: string): string {
+  return value.replace(/"/g, '\\"');
+}
+
+function buildWordQuery(word: string): string {
+  const safeWord = escapeQueryValue(word);
+  return `"deck:${config.anki.deckName}" "note:${config.anki.modelName}" "Word:${safeWord}"`;
+}
+
+export async function findCardIdsByWord(word: string): Promise<number[]> {
+  const query = buildWordQuery(word);
+  return ankiRequest<number[]>('findCards', { query });
+}
+
+export async function markWordAgain(word: string): Promise<number> {
+  const cardIds = await findCardIdsByWord(word);
+  if (cardIds.length === 0) {
+    return 0;
+  }
+
+  const answers = Array.from(new Set(cardIds)).map((cardId) => ({
+    cardId,
+    ease: 1, // Again
+  }));
+
+  await ankiRequest('answerCards', { answers });
+  return answers.length;
+}

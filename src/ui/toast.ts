@@ -5,7 +5,7 @@
 
 type ToastType = 'info' | 'success' | 'error';
 
-const TOAST_DURATION = 3000;
+const TOAST_DURATION = 6000;
 let toastContainer: HTMLDivElement | null = null;
 
 function ensureContainer(): HTMLDivElement {

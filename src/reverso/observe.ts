@@ -6,6 +6,7 @@ import {
 } from "../anki/ankiConnect";
 import { config } from "../config";
 import { toast } from "../ui/toast";
+import { getCurrentWord } from "./common";
 import { parseCard } from "./parseCard";
 
 const BUTTON_CLASS = "reverso-anki-button";
@@ -249,25 +250,6 @@ function processCards() {
   });
 
   console.log(`[Reverso->Anki] Processed ${cards.length} cards`);
-}
-
-/**
- * Get the current word/phrase from the page
- */
-function getCurrentWord(): string | null {
-  // Try to get from URL first
-  const match = window.location.pathname.match(/\/english-definition\/([^/]+)/);
-  if (match) {
-    return decodeURIComponent(match[1]).replace(/[+_]/g, " ");
-  }
-
-  // Fallback: try to get from blue word element
-  const blueWord = document.querySelector(".definition-list__blue-word");
-  if (blueWord) {
-    return blueWord.textContent?.trim() || null;
-  }
-
-  return null;
 }
 
 /**
